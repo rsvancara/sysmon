@@ -7,14 +7,16 @@ from sysmon.daemon import Daemon
 import json
 import socket
 import logging
+import pika
+import uuid
+import datetime
+import base64
 
 
 # Inherit from parent, override run method
 class SysmonDaemon(Daemon):
     
-    #def __init__():
 
-        
     #   #self.__init__(self,'/var/run/sysmon.pid')
     #    super(Daemon, self).__init__('/var/run/sysmond.pid')
     def run(self):
@@ -30,6 +32,12 @@ class SysmonDaemon(Daemon):
         
     
     def initialize(self):
+        # Setup our rabbitmq stuff
+        self.connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
+        self.channel = self.connection.channel()
+        self.channel.exchange_declare(exchange='logs',type='fanout')
+        self.channel.basic_publish(exchange='logs',routing_key='',body='{"client":' + socket.gethostname() + '}')
+        
         # Compile our regex for the minimal performance gain
         self.dev_re = re.compile('([A-Za-z0-9\.]+):\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)')
         self.meminfo_re = re.compile('([\w]+):\s(\d+)\s')
@@ -37,7 +45,10 @@ class SysmonDaemon(Daemon):
         self.diskstatus_re = re.compile('\s+(\d+)\s+(\d+)\s(\w+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)')
         while True:
             self.getProcesses()
-            time.sleep(5)        
+            time.sleep(2)        
+    
+    def getUUID(self ):
+        return base64.urlsafe_b64encode(uuid.uuid4().bytes).replace('=','')
     
         
     # Get all the processes that are not system
@@ -46,7 +57,15 @@ class SysmonDaemon(Daemon):
         """ Get all system processes """
         # walk the /proc
         stats = {}
+        stats['uuid'] = self.getUUID()
         stats['hostname'] = socket.gethostname()
+        d = datetime.datetime.utcnow()
+        stats['timestamp_year'] = d.strftime('%y')
+        stats['timestamp_month'] = d.strftime('%m')
+        stats['timestamp_day'] = d.strftime('%d')
+        stats['timestamp_hour'] = d.strftime('%H')
+        stats['timestamp_minute'] = d.strftime('%M')
+        stats['timestamp_second'] = d.strftime('%S')
         
         for item in os.listdir('/proc'):
             if re.match('[\d]+',item):
@@ -82,6 +101,7 @@ class SysmonDaemon(Daemon):
         # Get Infiniband statistics
         self.getInfinibandStats(stats)
         
+        self.channel.basic_publish(exchange='logs',routing_key='',body=json.dumps(stats))
         #print stats
                     
     def getMemInfo(self, stats):
