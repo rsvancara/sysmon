@@ -31,13 +31,31 @@ class SysmonDaemon(Daemon):
         self.initialize()
         
     
-    def initialize(self):
-        # Setup our rabbitmq stuff
-        self.connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
-        self.channel = self.connection.channel()
-        self.channel.exchange_declare(exchange='logs',type='fanout')
-        self.channel.basic_publish(exchange='logs',routing_key='',body='{"client":' + socket.gethostname() + '}')
+    def ampq_connect(self, ):
+        self.connection = None
+        self.channel = None
+        if self.connection is not None:
+            pass
         
+        while self.connection is None:
+            self.l.info("Attempting ampq connection")
+            
+            try:
+                self.credentials = pika.PlainCredentials('logs', 'logs')
+                self.connection = pika.BlockingConnection(pika.ConnectionParameters(host='localhost',port=5672,virtual_host='/',credentials=self.credentials,retry_delay=5))
+                self.channel = self.connection.channel()
+                #self.channel.exchange_declare(exchange='logs',type='fanout')
+                #self.channel.basic_publish(exchange='logs',routing_key='',body='{"client":' + socket.gethostname() + '}')
+                return
+            except Exception as e:
+                self.l.error("Could not connect to rabbitmq %s" % (e))
+            # Wait 10 seconds for the next connectiona attempt
+            time.sleep(10)
+         
+    def initialize(self):
+        
+        self.ampq_connect()
+            
         # Compile our regex for the minimal performance gain
         self.dev_re = re.compile('([A-Za-z0-9\.]+):\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)')
         self.meminfo_re = re.compile('([\w]+):\s(\d+)\s')
@@ -45,10 +63,10 @@ class SysmonDaemon(Daemon):
         self.diskstatus_re = re.compile('\s+(\d+)\s+(\d+)\s(\w+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)')
         while True:
             self.getProcesses()
-            time.sleep(2)        
+            time.sleep(.5)        
     
-    def getUUID(self ):
-        return base64.urlsafe_b64encode(uuid.uuid4().bytes).replace('=','')
+    def getUUID(self):
+        return re.sub('_|-|=','0',base64.urlsafe_b64encode(uuid.uuid4().bytes))
     
         
     # Get all the processes that are not system
@@ -101,7 +119,17 @@ class SysmonDaemon(Daemon):
         # Get Infiniband statistics
         self.getInfinibandStats(stats)
         
-        self.channel.basic_publish(exchange='logs',routing_key='',body=json.dumps(stats))
+        if self.channel is not None:
+            try:
+                self.channel.basic_publish(exchange='logs',routing_key='',body=json.dumps(stats))
+            except Exception as e:
+            
+                self.l.error("Error publishing to ampq exchange, perhaps rabbitmq is dead?? %s" % (e))
+                self.channel = None
+                self.connection = None
+                self.ampq_connect()
+        else:
+            self.ampq_connect()
         #print stats
                     
     def getMemInfo(self, stats):
@@ -276,7 +304,8 @@ class SysmonDaemon(Daemon):
                 f.close()
         
     def test(self, ):
-        
+        logging.basicConfig(level=logging.INFO)
+        logging.getLogger('pika').setLevel(logging.DEBUG)
         self.l = logging.getLogger('sysmon')
         ch = logging.StreamHandler()
         ch.setLevel(logging.ERROR)
