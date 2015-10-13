@@ -3,11 +3,10 @@
 import sys, time
 import os
 import re
-from sysmon.daemon import Daemon
-import json
+from sysmon.daemon import Daemon # Creates the standard two fork daemon
+from sysmon.Comm import Comm  # Communication Library for RabbitMQ
 import socket
 import logging
-import pika
 import uuid
 import datetime
 import base64
@@ -15,10 +14,7 @@ import base64
 
 # Inherit from parent, override run method
 class SysmonDaemon(Daemon):
-    
 
-    #   #self.__init__(self,'/var/run/sysmon.pid')
-    #    super(Daemon, self).__init__('/var/run/sysmond.pid')
     def run(self):
         
         self.l = logging.getLogger('sysmon')
@@ -29,45 +25,25 @@ class SysmonDaemon(Daemon):
         self.l.addHandler(ch)
         
         self.initialize()
-        
-    
-    def ampq_connect(self, ):
-        self.connection = None
-        self.channel = None
-        if self.connection is not None:
-            pass
-        
-        while self.connection is None:
-            self.l.info("Attempting ampq connection")
-            
-            try:
-                self.credentials = pika.PlainCredentials('logs', 'logs')
-                self.connection = pika.BlockingConnection(pika.ConnectionParameters(host='localhost',port=5672,virtual_host='/',credentials=self.credentials,retry_delay=5))
-                self.channel = self.connection.channel()
-                #self.channel.exchange_declare(exchange='logs',type='fanout')
-                #self.channel.basic_publish(exchange='logs',routing_key='',body='{"client":' + socket.gethostname() + '}')
-                return
-            except Exception as e:
-                self.l.error("Could not connect to rabbitmq %s" % (e))
-            # Wait 10 seconds for the next connectiona attempt
-            time.sleep(10)
          
     def initialize(self):
         
-        self.ampq_connect()
+        self.rabbitcom = Comm()
+        self.connect = self.rabbitcom.ampq_connect()
             
-        # Compile our regex for the minimal performance gain
+        # Pre-Compile our regex for the minimal performance gain
         self.dev_re = re.compile('([A-Za-z0-9\.]+):\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)')
         self.meminfo_re = re.compile('([\w]+):\s(\d+)\s')
         self.proc_stats_re = re.compile('([A-Za-z0-9]+)\s+(\d+)')
         self.diskstatus_re = re.compile('\s+(\d+)\s+(\d+)\s(\w+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)')
+ 
+        # Server main loop
         while True:
             self.getProcesses()
             time.sleep(.5)        
     
     def getUUID(self):
         return re.sub('_|-|=','0',base64.urlsafe_b64encode(uuid.uuid4().bytes))
-    
         
     # Get all the processes that are not system
     # processes
@@ -103,6 +79,7 @@ class SysmonDaemon(Daemon):
                     # process
                     if stat_info.st_uid >= 500:
                         self.getProcStatistics(item,stats)
+
         
         # Get memory information           
         self.getMemInfo(stats)
@@ -119,18 +96,7 @@ class SysmonDaemon(Daemon):
         # Get Infiniband statistics
         self.getInfinibandStats(stats)
         
-        if self.channel is not None:
-            try:
-                self.channel.basic_publish(exchange='logs',routing_key='',body=json.dumps(stats))
-            except Exception as e:
-            
-                self.l.error("Error publishing to ampq exchange, perhaps rabbitmq is dead?? %s" % (e))
-                self.channel = None
-                self.connection = None
-                self.ampq_connect()
-        else:
-            self.ampq_connect()
-        #print stats
+        self.rabbitcom.send_message(stats)
                     
     def getMemInfo(self, stats):
         if os.path.exists('/proc/meminfo'):
@@ -165,8 +131,8 @@ class SysmonDaemon(Daemon):
                         stats['net'][m.group(1)]['tx_colls'] = m.group(14)
                         stats['net'][m.group(1)]['tx_carrier'] = m.group(15)
                         stats['net'][m.group(1)]['tx_compressed'] = m.group(16)
-                        
-                    m = None
+                f.close()
+                m = None
     
     def getProcessorStats(self,stats ):
         # The cpu columns in /proc/stat show the amount of time spent doing
@@ -193,7 +159,8 @@ class SysmonDaemon(Daemon):
                             stats['cpu'][m.group(1)]['steal'] = m.group(9)
                             stats['cpu'][m.group(1)]['guest'] = m.group(10)
                             stats['cpu'][m.group(1)]['guest_nice'] = m.group(11)
-                        
+           
+                f.close()            
 
     def getDiskStats(self,stats ):
         if os.path.exists('/proc/diskstatus'):
@@ -232,7 +199,6 @@ class SysmonDaemon(Daemon):
                     for line in f.readlines():
                         m = re.match('([\w]+):\s(\d+)',line.rstrip())
                         if m is not None:
-                            #print("%s %s" % (m.group(1), m.group(2)))
                             stats[item][m.group(1)] = m.group(2)
                         m = None
                     f.close()
@@ -249,7 +215,6 @@ class SysmonDaemon(Daemon):
         try:
             if os.path.exists(path + '/cmdline'):
                 with open(path + '/cmdline') as f:
-                    #print f.readline()
                     stats[item]['cmdline'] = f.readline()
                     f.close()
         except Exception, err:
@@ -304,8 +269,10 @@ class SysmonDaemon(Daemon):
                 f.close()
         
     def test(self, ):
-        logging.basicConfig(level=logging.INFO)
-        logging.getLogger('pika').setLevel(logging.DEBUG)
+        # Turn this on for verbose debugging of PIKA
+        #logging.basicConfig(level=logging.INFO)
+        #logging.getLogger('pika').setLevel(logging.DEBUG)
+
         self.l = logging.getLogger('sysmon')
         ch = logging.StreamHandler()
         ch.setLevel(logging.ERROR)
@@ -315,12 +282,10 @@ class SysmonDaemon(Daemon):
         
         self.initialize()
 
-            
-    
 
 if __name__ == '__main__':
     
-    sysmond = SysmonDaemon('/tmp/daemon-example.pid')
+    sysmond = SysmonDaemon('/tmp/sysmon.pid')
     if len(sys.argv) == 2:
         if 'start' == sys.argv[1]:
             sysmond.start()
