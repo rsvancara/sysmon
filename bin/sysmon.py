@@ -1,4 +1,8 @@
 #!/usr/bin/env python
+#
+#
+# Prototype code for collecting data from systems
+#
 
 import sys, time
 import os
@@ -40,7 +44,11 @@ class SysmonDaemon(Daemon):
         # Server main loop
         while True:
             self.getProcesses()
-            time.sleep(.5)        
+            time.sleep(2)        
+ 
+    def S(self,key ):
+        return key.replace('.','_')
+    
     
     def getUUID(self):
         return re.sub('_|-|=','0',base64.urlsafe_b64encode(uuid.uuid4().bytes))
@@ -50,16 +58,18 @@ class SysmonDaemon(Daemon):
     def getProcesses(self, ):
         """ Get all system processes """
         # walk the /proc
+        data = {}
         stats = {}
-        stats['uuid'] = self.getUUID()
-        stats['hostname'] = socket.gethostname()
+        
+        data['uuid'] = self.getUUID()
         d = datetime.datetime.utcnow()
-        stats['timestamp_year'] = d.strftime('%y')
-        stats['timestamp_month'] = d.strftime('%m')
-        stats['timestamp_day'] = d.strftime('%d')
-        stats['timestamp_hour'] = d.strftime('%H')
-        stats['timestamp_minute'] = d.strftime('%M')
-        stats['timestamp_second'] = d.strftime('%S')
+        data['hostname'] = socket.gethostname()
+        data['timestamp_year'] = d.strftime('%y')
+        data['timestamp_month'] = d.strftime('%m')
+        data['timestamp_day'] = d.strftime('%d')
+        data['timestamp_hour'] = d.strftime('%H')
+        data['timestamp_minute'] = d.strftime('%M')
+        data['timestamp_second'] = d.strftime('%S')
         
         for item in os.listdir('/proc'):
             if re.match('[\d]+',item):
@@ -96,7 +106,9 @@ class SysmonDaemon(Daemon):
         # Get Infiniband statistics
         self.getInfinibandStats(stats)
         
-        self.rabbitcom.send_message(stats)
+        data['data'] = stats
+        
+        self.rabbitcom.send_message(data)
                     
     def getMemInfo(self, stats):
         if os.path.exists('/proc/meminfo'):
@@ -104,7 +116,7 @@ class SysmonDaemon(Daemon):
                 for line in f.readlines():
                     m = self.meminfo_re.match(line.rstrip())
                     if m is not None:
-                        stats[m.group(1)] = m.group(2)               
+                        stats[self.S(m.group(1))] = m.group(2)               
                     m = None
                 f.close()
             
@@ -115,22 +127,22 @@ class SysmonDaemon(Daemon):
                     m = self.dev_re.match(line)
                     if m is not None:
                         stats['net'] = {}
-                        stats['net'][m.group(1)] = {}
-                        stats['net'][m.group(1)]['rx_bytes'] = m.group(2)
-                        stats['net'][m.group(1)]['rx_packets'] = m.group(3)
-                        stats['net'][m.group(1)]['rx_errors'] = m.group(4)
-                        stats['net'][m.group(1)]['rx_drop'] = m.group(5)
-                        stats['net'][m.group(1)]['rx_fifo'] = m.group(6)
-                        stats['net'][m.group(1)]['rx_frame'] = m.group(7)
-                        stats['net'][m.group(1)]['rx_compressed'] = m.group(8)
-                        stats['net'][m.group(1)]['multicast'] = m.group(9)
-                        stats['net'][m.group(1)]['tx_bytes'] = m.group(10)
-                        stats['net'][m.group(1)]['tx_packets'] = m.group(10)
-                        stats['net'][m.group(1)]['tx_errs'] = m.group(12)
-                        stats['net'][m.group(1)]['tx_fifo'] = m.group(13)
-                        stats['net'][m.group(1)]['tx_colls'] = m.group(14)
-                        stats['net'][m.group(1)]['tx_carrier'] = m.group(15)
-                        stats['net'][m.group(1)]['tx_compressed'] = m.group(16)
+                        stats['net'][self.S(m.group(1))] = {}
+                        stats['net'][self.S(m.group(1))]['rx_bytes'] = m.group(2)
+                        stats['net'][self.S(m.group(1))]['rx_packets'] = m.group(3)
+                        stats['net'][self.S(m.group(1))]['rx_errors'] = m.group(4)
+                        stats['net'][self.S(m.group(1))]['rx_drop'] = m.group(5)
+                        stats['net'][self.S(m.group(1))]['rx_fifo'] = m.group(6)
+                        stats['net'][self.S(m.group(1))]['rx_frame'] = m.group(7)
+                        stats['net'][self.S(m.group(1))]['rx_compressed'] = m.group(8)
+                        stats['net'][self.S(m.group(1))]['multicast'] = m.group(9)
+                        stats['net'][self.S(m.group(1))]['tx_bytes'] = m.group(10)
+                        stats['net'][self.S(m.group(1))]['tx_packets'] = m.group(10)
+                        stats['net'][self.S(m.group(1))]['tx_errs'] = m.group(12)
+                        stats['net'][self.S(m.group(1))]['tx_fifo'] = m.group(13)
+                        stats['net'][self.S(m.group(1))]['tx_colls'] = m.group(14)
+                        stats['net'][self.S(m.group(1))]['tx_carrier'] = m.group(15)
+                        stats['net'][self.S(m.group(1))]['tx_compressed'] = m.group(16)
                 f.close()
                 m = None
     
@@ -148,17 +160,17 @@ class SysmonDaemon(Daemon):
                     if re.match('cpu',line):
                         m = self.proc_stats_re.match(line)
                         if m is not None:
-                            stats['cpu'][m.group(1)] = {}
-                            stats['cpu'][m.group(1)]['user'] = m.group(2)
-                            stats['cpu'][m.group(1)]['nice'] = m.group(3)
-                            stats['cpu'][m.group(1)]['system'] = m.group(4)
-                            stats['cpu'][m.group(1)]['idle'] = m.group(5)
-                            stats['cpu'][m.group(1)]['iowait'] = m.group(6)
-                            stats['cpu'][m.group(1)]['irq'] = m.group(7)
-                            stats['cpu'][m.group(1)]['softirq'] = m.group(8)
-                            stats['cpu'][m.group(1)]['steal'] = m.group(9)
-                            stats['cpu'][m.group(1)]['guest'] = m.group(10)
-                            stats['cpu'][m.group(1)]['guest_nice'] = m.group(11)
+                            stats['cpu'][self.S(m.group(1))] = {}
+                            stats['cpu'][self.S(m.group(1))]['user'] = m.group(2)
+                            stats['cpu'][self.S(m.group(1))]['nice'] = m.group(3)
+                            stats['cpu'][self.S(m.group(1))]['system'] = m.group(4)
+                            stats['cpu'][self.S(m.group(1))]['idle'] = m.group(5)
+                            stats['cpu'][self.S(m.group(1))]['iowait'] = m.group(6)
+                            stats['cpu'][self.S(m.group(1))]['irq'] = m.group(7)
+                            stats['cpu'][self.S(m.group(1))]['softirq'] = m.group(8)
+                            stats['cpu'][self.S(m.group(1))]['steal'] = m.group(9)
+                            stats['cpu'][self.S(m.group(1))]['guest'] = m.group(10)
+                            stats['cpu'][self.S(m.group(1))]['guest_nice'] = m.group(11)
            
                 f.close()            
 
@@ -199,7 +211,7 @@ class SysmonDaemon(Daemon):
                     for line in f.readlines():
                         m = re.match('([\w]+):\s(\d+)',line.rstrip())
                         if m is not None:
-                            stats[item][m.group(1)] = m.group(2)
+                            stats[item][self.S(m.group(1))] = m.group(2)
                         m = None
                     f.close()
         except Exception, err:
@@ -259,7 +271,7 @@ class SysmonDaemon(Daemon):
                     for line in f.readlines():
                         m = re.match('([\w]+):\s(\d+)',line.rstrip())
                         if m is not None:
-                             stats[item][m.group(1)] = m.group(2)
+                             stats[item][self.S(m.group(1))] = m.group(2)
                         m = None
                     f.close()
         except Exception, err:

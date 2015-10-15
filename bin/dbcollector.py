@@ -16,10 +16,11 @@ from pymongo import MongoClient
 from pymongo import Connection
 import json
 
-# Create a queue with the size of 100
-s_queue = Queue(100)
+# Create a queue with the size of 1000, after that we throw the data away
+s_queue = Queue(1000)
 
-# Connects to RabbitMQ and consumes the log information
+# Conects to RabbitMQ, listens for events and then
+# adds them to the queue
 class ConsumerThread(threading.Thread):
     def __init__(self, host, *args, **kwargs):
         super(ConsumerThread, self).__init__(*args, **kwargs)
@@ -33,9 +34,6 @@ class ConsumerThread(threading.Thread):
             #print "adding to queue"
             s_queue.put(body)
     
-            
-
-
     def run(self):
         credentials = pika.PlainCredentials("logs", "logs")
 
@@ -51,7 +49,8 @@ class ConsumerThread(threading.Thread):
         
         channel.start_consuming()
         
-# Writer queue responsible for emptying the queue 
+# DB Writer thread reads from the queue and then
+# inserts the values into MongoDB
 class DbWriterThread(threading.Thread):
     
     def __init__(self, threadid, *args, **kwargs):
@@ -61,9 +60,7 @@ class DbWriterThread(threading.Thread):
         
         self.connection = MongoClient('localhost')
         self.db = self.connection.logs.nodelogs
-        
-        
-        
+
         self.item_array = []
 
     def run(self):
@@ -87,21 +84,10 @@ class DbWriterThread(threading.Thread):
                     self.db.insert(stat)
 
                 self.item_array = []
-                
-    # def insertData(self,i,queue):
-    #     while True:
-    #         if not self.queue.empty():
-    #             stat = self.queue.get()
-    #             print stat
-    #         else:
-    #             time.sleep(2)
 
-    
-
-
+##
+# Daemon class
 class DbCollectorDaemon(Daemon):
-
-    
 
     def run(self, ):
         self.l = logging.getLogger('collector')
@@ -110,31 +96,29 @@ class DbCollectorDaemon(Daemon):
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         ch.setFormatter(formatter)
         self.l.addHandler(ch)
-    
 
-    
-    
         self.intialize()
         
     def intialize(self,):
 
-        # Worker threads
+        # Worker threads access the queue and look
+        # for data to insert.  There is no gaurantee
+        # in terms of insertion order, but should
+        # be quick enough to not affect front end
+        # applications doing realtime monitoring....we hope
         for i in range(4):
             #worker = threading.Thread())
             worker = DbWriterThread(i)
             worker.start()
             
-        # Consumer thread
+        # PIKA is not thread safe and the way
+        # we use the pub sub model does not facilitate
+        # threading very well anyway.  In this case
+        # we collect data as fast as we can and shove it
+        # into a queue that is consumed by many workers.
         cs = ConsumerThread("localhost")
         cs.start()
-        
-        
-        
-        #self.rabbitcom = Comm()
-        #self.connect = self.rabbitcom.ampq_connect()        
-        
-        
-        
+ 
     def test(self, ):
         # Turn this on for verbose debugging of PIKA
         #logging.basicConfig(level=logging.INFO)
@@ -148,8 +132,6 @@ class DbCollectorDaemon(Daemon):
         self.l.addHandler(ch)
         
         self.intialize()
-    
-
 
 if __name__ == '__main__':
 
