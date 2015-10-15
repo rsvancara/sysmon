@@ -41,8 +41,7 @@ class Comm:
                 self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=self.host,
                                                                                     port=self.port,
                                                                                     virtual_host=self.virtualhost,
-                                                                                    credentials=self.credentials,
-                                                                                    retry_delay=5))
+                                                                                    credentials=self.credentials))
                 self.channel = self.connection.channel()
                 return self.channel
             except Exception as e:
