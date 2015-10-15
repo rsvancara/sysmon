@@ -2,7 +2,8 @@
 
 #
 #
-#  
+#  RabbitMQ Communication Library makes
+#  it easier to use rabbitMQ
 #
 #
 
@@ -12,38 +13,48 @@ import json
 
 class Comm:
 
-    def __init__(self):
+    def __init__(self,host,username,password,virtualhost,exchange,queue,logger):
         self.connection = None
         self.channel = None
-        self.host = '10.10.0.134'
+        self.host = host
+        self.username = username
+        self.password = password
+        self.virtualhost = virtualhost
+        self.exchange = exchange
         self.credentials = pika.PlainCredentials('logs', 'logs')
         self.port = 5672
-        self.virtual_host = '/'
-        self.l = logging.getLogger('sysmon') 
+
+        self.l = logging.getLogger(logger) 
 
     def ampq_connect(self):
         self.connection = None
         self.channel = None
         if self.connection is not None:
+            self.l.debug("Connection is good")
             pass
 
         while self.connection is None:
             self.l.info("Attempting ampq connection")
 
             try:
-                self.credentials = pika.PlainCredentials('logs', 'logs')
-                self.connection = pika.BlockingConnection(pika.ConnectionParameters(host='10.10.0.134',port=5672,virtual_host='/',credentials=self.credentials,retry_delay=5))
+
+                self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=self.host,
+                                                                                    port=self.port,
+                                                                                    virtual_host=self.virtualhost,
+                                                                                    credentials=self.credentials,
+                                                                                    retry_delay=5))
                 self.channel = self.connection.channel()
-                return
+                return self.channel
             except Exception as e:
                 self.l.error("Could not connect to rabbitmq %s" % (e))
             # Wait 10 seconds for the next connectiona attempt
+            self.l.info("Waiting for connection")
             time.sleep(10)
 
     def send_message(self,stats):
         if self.channel is not None:
             try:
-                self.channel.basic_publish(exchange='logs',routing_key='',body=json.dumps(stats))
+                self.channel.basic_publish(exchange=self.exchange,routing_key='',body=json.dumps(stats))
             except Exception as e:
 
                 self.l.error("Error publishing to ampq exchange, perhaps rabbitmq is dead?? %s" % (e))

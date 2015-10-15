@@ -32,7 +32,7 @@ class SysmonDaemon(Daemon):
          
     def initialize(self):
         
-        self.rabbitcom = Comm()
+        self.rabbitcom = Comm('10.10.0.134','logs','logs','/','logs','','sysmon')
         self.connect = self.rabbitcom.ampq_connect()
             
         # Pre-Compile our regex for the minimal performance gain
@@ -44,7 +44,7 @@ class SysmonDaemon(Daemon):
         # Server main loop
         while True:
             self.getProcesses()
-            time.sleep(2)        
+            time.sleep(1)        
  
     def S(self,key ):
         return key.replace('.','_')
@@ -108,6 +108,7 @@ class SysmonDaemon(Daemon):
         
         data['data'] = stats
         
+        self.l.info("Sending data")
         self.rabbitcom.send_message(data)
                     
     def getMemInfo(self, stats):
@@ -282,7 +283,7 @@ class SysmonDaemon(Daemon):
         
     def test(self, ):
         # Turn this on for verbose debugging of PIKA
-        #logging.basicConfig(level=logging.INFO)
+        self.l = logging.basicConfig(level=logging.ERROR)
         #logging.getLogger('pika').setLevel(logging.DEBUG)
 
         self.l = logging.getLogger('sysmon')

@@ -21,46 +21,45 @@ s_queue = Queue(1000)
 
 # Conects to RabbitMQ, listens for events and then
 # adds them to the queue
-class ConsumerThread(threading.Thread):
+class LogConsumerThread(threading.Thread):
     def __init__(self, host, *args, **kwargs):
-        super(ConsumerThread, self).__init__(*args, **kwargs)
+        super(LogConsumerThread, self).__init__(*args, **kwargs)
         self.l = logging.getLogger('collector')
         self._host = host
 
     def callback(self, channel, method, properties, body):
-        #print("{} received '{}'".format(self.name, body))
-        # Load the event data into a queue
         if not s_queue.full():
             #print "adding to queue"
             s_queue.put(body)
     
     def run(self):
-        credentials = pika.PlainCredentials("logs", "logs")
+        
+        self.rabbitcom = Comm('10.10.0.134','logs','logs','/','logs','logs','collector')
+        self.connect = self.rabbitcom.ampq_connect()
+        #credentials = pika.PlainCredentials("logs", "logs")
 
-        connection = pika.BlockingConnection(pika.ConnectionParameters(host=self._host,credentials=credentials))
+        #connection = pika.BlockingConnection(pika.ConnectionParameters(host=self._host,credentials=credentials))
 
-        channel = connection.channel()
+        #channel = connection.channel()
 
-        channel.queue_bind(exchange='logs',queue='logs')
+        #channel.queue_bind(exchange='logs',queue='logs')
 
-        channel.basic_consume(self.callback,
+        self.rabbitcom.channel.basic_consume(self.callback,
                               "logs",
                               no_ack=True)
         
-        channel.start_consuming()
+        self.rabbitcom.channel.start_consuming()
         
 # DB Writer thread reads from the queue and then
 # inserts the values into MongoDB
-class DbWriterThread(threading.Thread):
+class LogDbWriterThread(threading.Thread):
     
     def __init__(self, threadid, *args, **kwargs):
-        super(DbWriterThread, self).__init__(*args, **kwargs)
+        super(LogDbWriterThread, self).__init__(*args, **kwargs)
         self.l = logging.getLogger('collector')
         print "initialized"
-        
         self.connection = MongoClient('localhost')
         self.db = self.connection.logs.nodelogs
-
         self.item_array = []
 
     def run(self):
@@ -108,7 +107,7 @@ class DbCollectorDaemon(Daemon):
         # applications doing realtime monitoring....we hope
         for i in range(4):
             #worker = threading.Thread())
-            worker = DbWriterThread(i)
+            worker = LogDbWriterThread(i)
             worker.start()
             
         # PIKA is not thread safe and the way
@@ -116,7 +115,7 @@ class DbCollectorDaemon(Daemon):
         # threading very well anyway.  In this case
         # we collect data as fast as we can and shove it
         # into a queue that is consumed by many workers.
-        cs = ConsumerThread("localhost")
+        cs = LogConsumerThread("localhost")
         cs.start()
  
     def test(self, ):
