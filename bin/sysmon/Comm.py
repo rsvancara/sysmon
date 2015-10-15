@@ -10,6 +10,7 @@
 import pika
 import logging
 import json
+import time
 
 class Comm:
 
